@@ -75,29 +75,6 @@ export type ControllerRow = {
   ref?: string | null;
 };
 
-export type AdminLogEntry = {
-  id: number;
-  time: string;
-  cat: string;
-  ckey?: string | null;
-  text: string;
-  x?: number | null;
-  y?: number | null;
-  z?: number | null;
-};
-
-export type AdminLog = {
-  entries: AdminLogEntry[];
-  matches: number;
-  total: number;
-  page: number;
-  pages: number;
-  categories: { id: string; name: string; count: number }[];
-  selected_categories: string[];
-  player?: string | null;
-  search: string;
-};
-
 export type MuteType = { name: string; flag: number };
 
 export type AdminMenuData = {
@@ -112,7 +89,7 @@ export type AdminMenuData = {
   rights: string;
   can_varedit: boolean;
   new_menu: boolean;
-  page: 'commands' | 'players' | 'mc' | 'log';
+  page: 'commands' | 'players' | 'mc';
   /** Bumped when the server opens a page (F6): the window jumps to data.page. */
   page_request: number;
   notice?: string | null;
@@ -120,9 +97,6 @@ export type AdminMenuData = {
   notice_id: number;
   recent: string[];
   favorites: string[];
-  log?: AdminLog;
-  /** Sent only when a new player appears in the Round Log. */
-  log_actors?: string[];
   active_tickets: number;
   round_time: string;
   player_count: number;
