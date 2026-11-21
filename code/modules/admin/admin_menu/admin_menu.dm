@@ -54,13 +54,23 @@ GLOBAL_DATUM_INIT(admin_menu_state, /datum/ui_state/admin_menu_state, new)
 	var/list/recent = list()
 	/// Favourite commands as verb path text, in the order they were starred. Saved per admin.
 	var/list/favorites
+	/// Round Log page: categories shown (empty = all), player ckey filter, search text and page.
+	var/list/log_categories = list()
+	var/log_player
+	var/log_search = ""
+	var/log_page = 1
+	/// Ids of matching entries, extended with new entries only (see round_log_page()).
+	var/list/log_cache = list()
 	/// Player Quality of the selected player: list("ckey", "num", "text", "time"). Read from disk at most every PQ_CACHE_TIME.
 	var/list/pq_cache
+	/// TRUE while a log page refresh is queued.
+	var/log_refresh_queued = FALSE
 	/// Timer of the slow refresh that replaces tgui's once-a-second autoupdate.
 	var/pulse_timer
 	/// Heavy lists last sent to the window: they are left out of updates while unchanged
 	/// (tgui keeps the previous value of keys an update does not contain).
 	var/list/sent_players
+	var/sent_actor_count = -1
 	/// TRUE while a verb list refresh is queued.
 	var/verb_refresh_queued = FALSE
 
@@ -108,15 +118,17 @@ GLOBAL_DATUM_INIT(admin_menu_state, /datum/ui_state/admin_menu_state, new)
 	ui = SStgui.try_update_ui(user, src, ui)
 	if(!ui)
 		ui = new(user, src, "AdminMenu", "Admin Menu")
-		// A new window needs the player list on its first visit to Players.
+		// A new window has none of the heavy lists yet.
 		sent_players = null
+		sent_actor_count = -1
 		ui.open()
 	sync_autoupdate(ui)
 
 /**
  * tgui would resend the whole page every second, URL-encoded (about three times its JSON size).
  * Instead the window is refreshed after every action and by a slow pulse whose pace depends on
- * the page: players and MC every 2 seconds, and the command pages every 10.
+ * the page: players and MC every 2 seconds, the command pages every 10, the Round Log only when
+ * something is logged.
  */
 /datum/admin_menu/proc/sync_autoupdate(datum/tgui/ui)
 	ui?.set_autoupdate(FALSE)
@@ -126,12 +138,17 @@ GLOBAL_DATUM_INIT(admin_menu_state, /datum/ui_state/admin_menu_state, new)
 	switch(page)
 		if("players", "mc")
 			return 2 SECONDS
+		if("log")
+			return 0
 	return 10 SECONDS
 
 /datum/admin_menu/proc/restart_pulse()
 	if(pulse_timer)
 		deltimer(pulse_timer)
-	pulse_timer = addtimer(CALLBACK(src, PROC_REF(pulse)), pulse_interval(), TIMER_STOPPABLE)
+		pulse_timer = null
+	var/interval = pulse_interval()
+	if(interval)
+		pulse_timer = addtimer(CALLBACK(src, PROC_REF(pulse)), interval, TIMER_STOPPABLE)
 
 /datum/admin_menu/proc/pulse()
 	pulse_timer = null
@@ -145,6 +162,18 @@ GLOBAL_DATUM_INIT(admin_menu_state, /datum/ui_state/admin_menu_state, new)
 	if(pulse_timer)
 		deltimer(pulse_timer)
 		pulse_timer = null
+
+/// Called when a new admin log entry arrives: refreshes this window soon if it shows the log.
+/datum/admin_menu/proc/queue_log_refresh()
+	if(page != "log" || log_refresh_queued)
+		return
+	log_refresh_queued = TRUE
+	addtimer(CALLBACK(src, PROC_REF(refresh_log)), 1 SECONDS)
+
+/datum/admin_menu/proc/refresh_log()
+	log_refresh_queued = FALSE
+	if(page == "log")
+		SStgui.update_uis(src)
 
 /datum/admin_menu/proc/set_notice(text, type = "info")
 	notice = text
@@ -235,6 +264,17 @@ GLOBAL_DATUM_INIT(admin_menu_state, /datum/ui_state/admin_menu_state, new)
 		data["selected"] = selected ? player_detail_data(selected) : null
 	if(page == "mc")
 		data["mc"] = controller_data(admin)
+	if(page == "log")
+		var/list/feed = round_log_page(log_categories, log_player, log_search, log_page, log_cache)
+		// Top level on purpose: tgui only keeps unchanged values for top-level keys.
+		if(sent_actor_count != length(GLOB.round_log_actors))
+			sent_actor_count = length(GLOB.round_log_actors)
+			data["log_actors"] = round_log_actor_list()
+		log_page = feed["page"]
+		feed["selected_categories"] = log_categories
+		feed["player"] = log_player
+		feed["search"] = log_search
+		data["log"] = feed
 	return data
 
 /datum/admin_menu/ui_act(action, list/params, datum/tgui/ui, datum/ui_state/state)
@@ -250,15 +290,44 @@ GLOBAL_DATUM_INIT(admin_menu_state, /datum/ui_state/admin_menu_state, new)
 	switch(action)
 		if("set_page")
 			var/new_page = params["page"]
-			if(!(new_page in list("commands", "players", "mc")))
-				return FALSE
-			page = new_page
-			sent_players = null // the new page sends its player list afresh
-			sync_autoupdate(ui)
+			if(new_page in list("commands", "players", "mc", "log"))
+				page = new_page
+				sent_players = null // the new page sends its lists afresh
+				sent_actor_count = -1
+				sync_autoupdate(ui)
 			return TRUE
 
 		if("toggle_favorite")
 			return toggle_favorite(admin, params["path"])
+
+		if("log_filter")
+			if(!isnull(params["player"]))
+				var/new_player = params["player"]
+				log_player = (istext(new_player) && length(new_player)) ? ckey(new_player) : null
+			if(istext(params["search"]))
+				log_search = copytext_char(params["search"], 1, 101)
+			if(islist(params["categories"]))
+				var/list/valid = round_log_categories()
+				log_categories = list()
+				for(var/category in params["categories"])
+					if(valid[category])
+						log_categories |= category
+			log_page = 1
+			return TRUE
+
+		if("log_jump")
+			var/turf/spot = locate(text2num("[params["x"]]"), text2num("[params["y"]]"), text2num("[params["z"]]"))
+			if(!spot)
+				return fail("That place is not on the map.")
+			user.forceMove(spot)
+			log_admin("[key_name(user)] jumped to [AREACOORD(spot)] from the Round Log.")
+			return TRUE
+
+		if("log_page")
+			var/new_log_page = text2num("[params["page"]]")
+			if(isnum(new_log_page))
+				log_page = max(1, round(new_log_page))
+			return TRUE
 
 		if("run_verb")
 			return run_verb(admin, params["path"])

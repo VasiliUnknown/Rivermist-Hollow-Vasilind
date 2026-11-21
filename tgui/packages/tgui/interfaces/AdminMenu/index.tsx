@@ -17,10 +17,11 @@ import {
   type MenuVerb,
   QUICK_ACCESS,
 } from './catalog';
+import { LogPage } from './LogPage';
 import { PlayersPage } from './PlayersPage';
 import type { AdminMenuData } from './types';
 
-type Section = CategoryId | 'home' | 'mc';
+type Section = CategoryId | 'home' | 'mc' | 'log';
 
 /** How long a dangerous command stays armed after the first click. */
 const CONFIRM_MS = 4000;
@@ -28,7 +29,13 @@ const CONFIRM_MS = 4000;
 export const AdminMenu = () => {
   const { act, data } = useBackend<AdminMenuData>();
   const [section, setSection] = useState<Section>(
-    data.page === 'players' || data.page === 'mc' ? data.page : 'home',
+    data.page === 'players'
+      ? 'players'
+      : data.page === 'mc'
+        ? 'mc'
+        : data.page === 'log'
+          ? 'log'
+          : 'home',
   );
   const [search, setSearch] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
@@ -59,7 +66,15 @@ export const AdminMenu = () => {
     }
     lastRequest.current = data.page_request;
     setSearch('');
-    setSection(data.page === 'players' || data.page === 'mc' ? data.page : 'home');
+    setSection(
+      data.page === 'players'
+        ? 'players'
+        : data.page === 'mc'
+          ? 'mc'
+          : data.page === 'log'
+            ? 'log'
+            : 'home',
+    );
   }, [data.page_request, data.page]);
 
   useEffect(
@@ -74,7 +89,8 @@ export const AdminMenu = () => {
   const goTo = (next: Section) => {
     setSection(next);
     setSearch('');
-    const page = next === 'players' || next === 'mc' ? next : 'commands';
+    const page =
+      next === 'players' || next === 'mc' || next === 'log' ? next : 'commands';
     if (page !== data.page) {
       act('set_page', { page });
     }
@@ -373,6 +389,9 @@ export const AdminMenu = () => {
   } else if (section === 'mc') {
     crumb = 'Debug › Master Controller';
     body = renderController();
+  } else if (section === 'log') {
+    crumb = 'Round Log';
+    body = <LogPage />;
   } else {
     crumb = current?.name || '';
     const verbs = catalog.filter((verb) => verb.categoryId === section);
@@ -460,6 +479,18 @@ export const AdminMenu = () => {
                   </Tooltip>
                 );
               })}
+              <Tooltip
+                content="What players and admins did this round: combat, speech, emotes, OOC, game and admin actions, with filters and jump-to."
+                position="right"
+              >
+                <div
+                  className={`AdminMenu__nav${section === 'log' && !query ? ' AdminMenu__nav--on' : ''}`}
+                  onClick={() => goTo('log')}
+                >
+                  <Icon name="clipboard-list" className="AdminMenu__navIcon" />
+                  <span>Round Log</span>
+                </div>
+              </Tooltip>
               <Tooltip
                 content="Subsystem status, the old MC tab. Opening entries in VV needs +VAREDIT."
                 position="right"
