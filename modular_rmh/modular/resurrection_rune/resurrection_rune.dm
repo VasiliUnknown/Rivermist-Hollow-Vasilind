@@ -1768,18 +1768,26 @@
 
 	var/datum/admins/acting_holder = holder
 	var/datum/mind/occupied_mind = body.mind
-	var/answer = tgui_alert(mob, "Привязать к руне?", "Руна воскрешения — [body]", list("Да", "Нет"), timeout = 30 SECONDS)
-	if(!answer || QDELETED(src) || holder != acting_holder || holder?.owner != src || QDELETED(body) || QDELETED(occupant) || body.client != occupant)
+	var/answer = tgui_alert(
+		mob,
+		"Bind to a rune?\n\nSever completely removes the link and enables No Return.",
+		"Resurrection Rune — [body]",
+		list("Yes", "No", "Sever completely"),
+		timeout = 30 SECONDS,
+	)
+	if(answer != "Yes" && answer != "Sever completely")
+		return
+	if(QDELETED(src) || holder != acting_holder || holder?.owner != src || QDELETED(body) || QDELETED(occupant) || body.client != occupant)
 		return
 	var/datum/mind/target_mind = body.mind
 	if(QDELETED(target_mind) || target_mind.current != body || (occupied_mind && target_mind != occupied_mind))
 		return
 
-	if(answer == "Нет")
+	if(answer == "Sever completely")
 		ADD_TRAIT(body, TRAIT_RUNE_SEVERED, ADMIN_TRAIT)
 		log_admin("[key_name(src)] severed [key_name(body)] from resurrection runes and set them to No Return.")
 		message_admins("[key_name_admin(src)] severed [key_name(body)] from resurrection runes and set them to No Return.")
-		to_chat(src, span_notice("[body]: связь с руной разорвана. Смерть окончательная."))
+		to_chat(src, span_notice("[body]'s rune link is severed. Death is final."))
 		return
 
 	var/obj/structure/resurrection_rune/rune = find_resurrection_rune_by_mind(target_mind)
@@ -1788,7 +1796,7 @@
 	if(!rune?.resrunecontroler)
 		rune = get_emergency_resurrection_rune()
 	if(!rune?.resrunecontroler)
-		to_chat(src, span_warning("Нет доступной руны для привязки [body]."))
+		to_chat(src, span_warning("No resurrection rune is available for [body]."))
 		return
 
 	var/was_severed_by_admin = HAS_TRAIT_FROM(body, TRAIT_RUNE_SEVERED, ADMIN_TRAIT)
